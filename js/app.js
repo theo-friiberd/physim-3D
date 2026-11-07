@@ -196,13 +196,30 @@ window.addEventListener('keydown', (ev) => {
   if (ev.target.closest?.('input, select, textarea')) return;
   if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
   const key = ev.key.toLowerCase();
+  const bare = ev.target === document.body || ev.target === canvas;
+
+  // Numpad camera views (Shift = opposite side), like Blender
+  const view = { Numpad1: [0, 0, 1], Numpad3: [1, 0, 0], Numpad7: [0, 1, 0] }[ev.code];
+  if (view) { setView(view, ev.shiftKey); ev.preventDefault(); return; }
+
+  // 1 / 2 / 3 switch workspace
+  const ws = { Digit1: 'layout', Digit2: 'physics', Digit3: 'debug' }[ev.code];
+  if (ws && !ev.shiftKey) { setWorkspace(ws); return; }
+
   if (ev.key === ' ' && ev.target.tagName !== 'BUTTON') { ev.preventDefault(); setRunning(!state.running); }
+  else if (ev.shiftKey && key === 'a') { document.querySelectorAll('.menu-btn')[1].click(); ev.preventDefault(); }
+  else if (ev.shiftKey && key === 'c') { resetCamera(); }
+  else if (ev.key === 'ArrowRight' && bare) { doStep(); ev.preventDefault(); }
+  else if (ev.key === 'ArrowLeft' && bare) { doReset(); ev.preventDefault(); }
+  else if (ev.shiftKey) { if (ev.key === '?') toggleHelp(); }
   else if (key === 'n') doStep();
   else if (key === 'r') doReset();
   else if (key === 'b') detonateAll();
+  else if (key === 'z') setToggle('colliders', !toggles.colliders.on);
+  else if (key === 'v') setToggle('velocity', !toggles.velocity.on);
+  else if (key === 'c') setToggle('normals', !toggles.normals.on);
   else if (key === '.') frameSelected();
   else if (key === 'home') resetCamera();
-  else if (ev.key === '?') toggleHelp();
 });
 
 // ----------------------------------------------------------------------------
@@ -313,6 +330,14 @@ function frameSelected() {
   const offset = camera.position.clone().sub(orbit.target);
   orbit.target.copy(p);
   camera.position.copy(p).add(offset);
+}
+/** Look at the orbit target from an axis direction, keeping the current distance. */
+function setView(dir, opposite) {
+  const dist = camera.position.distanceTo(orbit.target);
+  const d = new THREE.Vector3(...dir).multiplyScalar(opposite ? -1 : 1);
+  if (d.y !== 0) d.x = 0.0001;                   // avoid a degenerate up-vector at the poles
+  camera.position.copy(orbit.target).addScaledVector(d.normalize(), dist);
+  orbit.update();
 }
 function resetCamera() {
   camera.position.copy(HOME_POS);

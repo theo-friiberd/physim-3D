@@ -4,13 +4,13 @@
 import * as THREE from 'three';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import {
-  state, MIN_SCALE, createEntity, removeEntity, pointsFromObject, syncBodyFromMesh, allItems, on,
+  state, MIN_SCALE, createEntity, removeEntity, pointsFromObject, syncBodyFromMesh, allItems, on, emit, setDamping,
 } from './physics.js';
 import { createJoint, removeJoint, nearestPartner, usesPivot } from './joints.js';
 import { createField, removeField } from './fields.js';
-import { createCloth, removeCloth } from './cloth.js';
+import { createCloth, removeCloth, rebuildCloth } from './cloth.js';
 import { commitTransform, refreshInspector } from './inspector.js';
-import { highlight } from './outliner.js';
+import { highlight, setItemVisible } from './outliner.js';
 
 const TRANSFORM_TOOLS = ['translate', 'rotate', 'scale'];
 
@@ -213,6 +213,81 @@ export function deleteSelected() {
 }
 
 // ----------------------------------------------------------------------------
+// Duplicate / hide / cycle selection
+// ----------------------------------------------------------------------------
+function deepCloneObject(root) {
+  const c = root.clone(true);
+  c.traverse((o) => {
+    if (o.isMesh) {
+      o.geometry = o.geometry.clone();
+      o.material = Array.isArray(o.material) ? o.material.map((m) => m.clone()) : o.material.clone();
+    }
+  });
+  return c;
+}
+
+export function duplicateSelected() {
+  const it = selected;
+  if (!it) { ctx.toast('Select something to duplicate.', 'info'); return null; }
+  let copy = null;
+
+  if (it.category === 'body') {
+    const mesh = deepCloneObject(it.mesh);
+    mesh.position.add(new THREE.Vector3(0.7, it.isStatic ? 0 : 0.4, 0.7));
+    copy = createEntity({
+      name: `${it.name} copy`,
+      kind: it.kind,
+      mesh,
+      localPoints: it.localPoints.map((p) => p.clone()),
+      colliderType: it.colliderType,
+      isStatic: it.isStatic,
+      mass: it.mass,
+      friction: it.friction,
+      restitution: it.restitution,
+    });
+    setDamping(copy, it.linearDamping, it.angularDamping);
+  } else if (it.category === 'field') {
+    copy = createField(it.kind, it.root.position.clone().add(new THREE.Vector3(1, 0, 1)));
+    Object.assign(copy, { name: `${it.name} copy`, enabled: it.enabled, strength: it.strength, radius: it.radius, falloff: it.falloff, turbulence: it.turbulence, triggerFrame: it.triggerFrame });
+    copy.root.quaternion.copy(it.root.quaternion);
+  } else if (it.category === 'cloth') {
+    copy = createCloth({ res: it.res, size: it.size, pin: it.pin, position: it.root.position.clone().add(new THREE.Vector3(1, 0, 1)) });
+    copy.root.quaternion.copy(it.root.quaternion);
+    Object.assign(copy, { name: `${it.name} copy`, stiffness: it.stiffness, damping: it.damping });
+    setClothMassSafe(copy, it.pMass);
+    rebuildClothSafe(copy);
+  } else {
+    ctx.toast('Joints cannot be duplicated. Add a new one from the Add menu.', 'info');
+    return null;
+  }
+  emit('scene');
+  select(copy);
+  return copy;
+}
+
+function setClothMassSafe(c, m) { c.pMass = m; }
+function rebuildClothSafe(c) { rebuildCloth(c); }
+
+export function hideSelected() {
+  if (!selected) return;
+  setItemVisible(selected, false);
+  emit('scene');
+}
+
+export function showAll() {
+  for (const it of allItems()) if (it.visible === false) setItemVisible(it, true);
+  emit('scene');
+  refreshInspector(true);
+}
+
+export function cycleSelection(dir) {
+  const items = allItems();
+  if (!items.length) return;
+  const i = selected ? items.indexOf(selected) : -1;
+  select(items[(i + dir + items.length) % items.length]);
+}
+
+// ----------------------------------------------------------------------------
 // Init
 // ----------------------------------------------------------------------------
 export function initBuilder(context) {
@@ -279,7 +354,13 @@ export function initBuilder(context) {
     if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
     const key = ev.key.toLowerCase();
     const map = { q: 'select', w: 'translate', e: 'rotate', t: 'scale', f: 'fling', g: 'grab' };
-    if (map[key]) setTool(map[key]);
+    const bare = ev.target === document.body || ev.target === canvas;
+    if (ev.shiftKey && key === 'd') { duplicateSelected(); ev.preventDefault(); }
+    else if (ev.shiftKey && key === 'h') showAll();
+    else if (!ev.shiftKey && key === 'h') hideSelected();
+    else if (key === 'tab' && bare) { cycleSelection(ev.shiftKey ? -1 : 1); ev.preventDefault(); }
+    else if (ev.shiftKey) return;
+    else if (map[key]) setTool(map[key]);
     else if (key === 'delete' || key === 'backspace' || key === 'x') { if (selected) { deleteSelected(); ev.preventDefault(); } }
     else if (key === 'escape') select(null);
   });
