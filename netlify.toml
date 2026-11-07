@@ -20,9 +20,9 @@
 
 # ---------------------------------------------------------------------------
 # CDN caching
-# HTML is always revalidated so a new deploy is visible immediately.
-# JS/CSS are cached for an hour in browsers and a day on the CDN edge;
-# Netlify purges its edge cache automatically on every deploy.
+# Everything that makes up the app (HTML, JS modules, CSS) is revalidated on
+# every load (cheap 304s via ETag), so a new deploy never mixes stale files with
+# new ones. Netlify also purges its edge cache on every deploy.
 # ---------------------------------------------------------------------------
 [[headers]]
   for = "/index.html"
@@ -37,13 +37,13 @@
 [[headers]]
   for = "/js/*"
   [headers.values]
-    Cache-Control = "public, max-age=3600, stale-while-revalidate=86400"
+    Cache-Control = "public, max-age=0, must-revalidate"
     Content-Type = "text/javascript; charset=utf-8"
 
 [[headers]]
   for = "/styles.css"
   [headers.values]
-    Cache-Control = "public, max-age=3600, stale-while-revalidate=86400"
+    Cache-Control = "public, max-age=0, must-revalidate"
     Content-Type = "text/css; charset=utf-8"
 
 # Any static assets (sample models, icons, ...) you add later under /assets
