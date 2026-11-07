@@ -14,9 +14,32 @@ export const state = {
   running: false,       // simulation is stepping every frame
   started: false,       // at least one step happened since the last reset
   timeScale: 1,
-  entities: [],         // every physical object in the scene
+  frame: 0,             // fixed physics steps since the last reset (60 per simulated second)
+  stepMs: 0,            // smoothed cost of world.step() in milliseconds
+  contacts: 0,          // contact equations in the last step
+  entities: [],         // rigid bodies (category "body")
+  constraints: [],      // joints (category "constraint"), managed by joints.js
+  fields: [],           // force fields (category "field"), managed by fields.js
+  cloths: [],           // cloth sheets (category "cloth"), managed by cloth.js
   nextId: 1,
 };
+
+/** Every selectable item in the scene (bodies, constraints, fields, cloths). */
+export function allItems() {
+  return [...state.entities, ...state.constraints, ...state.fields, ...state.cloths];
+}
+
+// ---- tiny event bus: 'scene' (list changed), 'removed' (item), 'static' (entity),
+//      'transform' (entity moved by hand), 'reset', 'clear' ----
+const listeners = {};
+export function on(evt, fn) { (listeners[evt] ||= []).push(fn); }
+export function emit(evt, arg) { for (const fn of listeners[evt] || []) fn(arg); }
+
+// ---- per-step hooks (run after every fixed physics step; forces set here are used by the next step) ----
+const stepHooks = [];
+export function addStepHook(fn) { stepHooks.push(fn); }
+
+export function getScene() { return scene; }
 
 let world = null;
 let scene = null;
@@ -50,6 +73,11 @@ export function initPhysics(threeScene) {
   groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
   world.addBody(groundBody);
 
+  world.addEventListener('postStep', () => {
+    state.frame++;
+    for (const hook of stepHooks) hook(FIXED_DT);
+  });
+
   debugGroup = new THREE.Group();
   debugGroup.name = 'collider-debug';
   debugGroup.visible = false;
@@ -58,6 +86,8 @@ export function initPhysics(threeScene) {
 }
 
 export function getWorld() { return world; }
+
+export function setSolverIterations(n) { world.solver.iterations = Math.max(1, Math.round(n)); }
 
 export function setGravity(x, y, z) {
   world.gravity.set(x, y, z);
@@ -216,6 +246,11 @@ export function createEntity(opts) {
     debug: null,
     dragging: false,
     initial: null,
+    category: 'body',
+    scalable: true,
+    root: opts.mesh,
+    linearDamping: 0.02,
+    angularDamping: 0.08,
   };
 
   e.body = new CANNON.Body({
@@ -237,16 +272,24 @@ export function createEntity(opts) {
   captureInitial(e);
   state.entities.push(e);
   if (debugOn) rebuildDebug(e);
+  emit('scene');
   return e;
 }
 
 export function removeEntity(e) {
+  emit('removed', e);            // joints attached to this body remove themselves
   world.removeBody(e.body);
   scene.remove(e.mesh);
   disposeObject(e.mesh);
   if (e.debug) { debugGroup.remove(e.debug); disposeObject(e.debug); e.debug = null; }
   const i = state.entities.indexOf(e);
   if (i >= 0) state.entities.splice(i, 1);
+  emit('scene');
+}
+
+export function setDamping(e, linear, angular) {
+  if (linear !== undefined) { e.linearDamping = linear; e.body.linearDamping = linear; }
+  if (angular !== undefined) { e.angularDamping = angular; e.body.angularDamping = angular; }
 }
 
 export function clearEntities() {
@@ -325,6 +368,7 @@ export function setStatic(e, isStatic) {
   if (isStatic) syncBodyFromMesh(e);
   if (debugOn) rebuildDebug(e);
   if (isStatic) captureInitial(e);
+  emit('static', e);
 }
 
 export function setMass(e, mass) {
@@ -358,15 +402,21 @@ export function applyImpulse(e, impulse, worldPoint) {
 // ----------------------------------------------------------------------------
 export function update(dt) {
   if (state.running) {
+    const t0 = performance.now();
     world.step(FIXED_DT, Math.min(dt, 0.1) * state.timeScale, 6);
+    state.stepMs = state.stepMs * 0.9 + (performance.now() - t0) * 0.1;
     state.started = true;
   }
+  state.contacts = world.contacts.length;
   syncVisuals();
 }
 
 export function stepOnce() {
+  const t0 = performance.now();
   world.step(FIXED_DT);
+  state.stepMs = performance.now() - t0;
   state.started = true;
+  state.contacts = world.contacts.length;
   syncVisuals();
 }
 
@@ -393,6 +443,9 @@ export function resetAll() {
     if (e.debug) { e.debug.position.copy(p); e.debug.quaternion.copy(q); }
   }
   state.started = false;
+  state.frame = 0;
+  state.stepMs = 0;
+  emit('reset');                 // cloth, joints and fields restore their own state
 }
 
 // ----------------------------------------------------------------------------

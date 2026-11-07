@@ -1,12 +1,21 @@
 // ============================================================================
-// app.js: Three.js setup, render loop, simulation / world controls, fling tool
+// app.js: Three.js setup, render loop, menus / workspaces, simulation + world
+//         controls, fling tool and the demo scene
 // ============================================================================
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import * as Physics from './physics.js';
-import { initBuilder, spawnPrimitive, updateSelectionHelper, refreshInspector } from './builder.js';
+import { initNumberFields, initMenus, initTabs, showPropsTab, nf, toast, loading } from './ui.js';
+import { initInspector, refreshInspector } from './inspector.js';
+import { initOutliner } from './outliner.js';
+import { initBuilder, spawnPrimitive, addCloth, updateSelectionHelper } from './builder.js';
 import { initLoaders } from './loaders.js';
+import { initInteract, setOverlay, updateOverlays } from './interact.js';
+import { initTimeline, updateTimeline } from './timeline.js';
+import { createJoint, clearJoints, updateJointVisuals } from './joints.js';
+import { createField, clearFields, detonate, updateFieldVisuals } from './fields.js';
+import { createCloth, clearCloths, updateClothVisuals } from './cloth.js';
 
 const $ = (id) => document.getElementById(id);
 const { state } = Physics;
@@ -15,6 +24,7 @@ const { state } = Physics;
 // Renderer, scene, camera
 // ----------------------------------------------------------------------------
 const canvas = $('viewport');
+const wrap = $('viewport-wrap');
 let renderer;
 try {
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -23,51 +33,61 @@ try {
   throw err;
 }
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.0;
 
+const BG = 0x1e1e1e;
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x10141c);
-scene.fog = new THREE.Fog(0x10141c, 60, 160);
+scene.background = new THREE.Color(BG);
+scene.fog = new THREE.Fog(BG, 70, 170);
 
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
-const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.05, 500);
-camera.position.set(4, 5.5, 10);
+const camera = new THREE.PerspectiveCamera(50, 1, 0.05, 500);
+const HOME_POS = new THREE.Vector3(5, 6, 12);
+const HOME_TARGET = new THREE.Vector3(-1, 1.5, 0);
+camera.position.copy(HOME_POS);
 
-// ---- lights ----
-scene.add(new THREE.HemisphereLight(0xbcd2ff, 0x1a1f2a, 0.35));
+scene.add(new THREE.HemisphereLight(0xbcd2ff, 0x1a1a1a, 0.35));
 const sun = new THREE.DirectionalLight(0xffffff, 1.9);
 sun.position.set(8, 14, 6);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
-sun.shadow.camera.left = -22; sun.shadow.camera.right = 22;
-sun.shadow.camera.top = 22; sun.shadow.camera.bottom = -22;
-sun.shadow.camera.near = 1; sun.shadow.camera.far = 60;
+Object.assign(sun.shadow.camera, { left: -24, right: 24, top: 24, bottom: -24, near: 1, far: 60 });
 sun.shadow.bias = -0.0004;
 sun.shadow.normalBias = 0.02;
 scene.add(sun);
 
-// ---- floor visuals (the physical floor lives in physics.js) ----
+// floor visuals (the physical floor lives in physics.js)
 const ground = new THREE.Mesh(
   new THREE.PlaneGeometry(400, 400),
-  new THREE.MeshStandardMaterial({ color: 0x1a2130, roughness: 0.95, metalness: 0 }),
+  new THREE.MeshStandardMaterial({ color: 0x262626, roughness: 0.95, metalness: 0 }),
 );
 ground.rotation.x = -Math.PI / 2;
 ground.position.y = -0.002;
 ground.receiveShadow = true;
 scene.add(ground);
 
-const grid = new THREE.GridHelper(120, 120, 0x40527a, 0x263147);
+const grid = new THREE.GridHelper(120, 120, 0x555555, 0x333333);
 grid.position.y = 0.002;
 grid.material.transparent = true;
-grid.material.opacity = 0.55;
+grid.material.opacity = 0.7;
 grid.material.depthWrite = false;
 scene.add(grid);
+
+// Blender-style coloured axes (X red, Z blue)
+function axisLine(a, b, color) {
+  const g = new THREE.BufferGeometry().setFromPoints([a, b]);
+  const l = new THREE.Line(g, new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.85, depthWrite: false }));
+  l.position.y = 0.004;
+  return l;
+}
+const axes = new THREE.Group();
+axes.add(axisLine(new THREE.Vector3(-60, 0, 0), new THREE.Vector3(60, 0, 0), 0xb83a3a));
+axes.add(axisLine(new THREE.Vector3(0, 0, -60), new THREE.Vector3(0, 0, 60), 0x3a6bb8));
+scene.add(axes);
 
 // ----------------------------------------------------------------------------
 // Physics + shared context
@@ -80,7 +100,10 @@ const ctx = {
   tool: 'select', selected: null,
   select: () => {},
   lastGizmoDrag: 0,
+  afterFrame: [],
   toast, loading,
+  reset: doReset,
+  setRunning,
   /** World position near the orbit target where the next object appears (golden-angle spiral). */
   spawnPoint(i) {
     const t = ctx.orbit.target;
@@ -90,13 +113,19 @@ const ctx = {
   },
 };
 
+// UI widgets first: the inspector needs the number fields
+initNumberFields();
+initMenus();
+initTabs();
+initInspector(ctx);
+
 // The fling tool must see pointerdown before OrbitControls, so register it first.
 initFling();
 
 const orbit = new OrbitControls(camera, canvas);
 orbit.enableDamping = true;
 orbit.dampingFactor = 0.08;
-orbit.target.set(-3, 1.2, 0);
+orbit.target.copy(HOME_TARGET);
 orbit.maxPolarAngle = Math.PI * 0.495;
 orbit.minDistance = 1;
 orbit.maxDistance = 120;
@@ -104,25 +133,10 @@ orbit.update();
 ctx.orbit = orbit;
 
 initBuilder(ctx);
+initOutliner(ctx);
+initInteract(ctx);
 initLoaders(ctx);
-
-// ----------------------------------------------------------------------------
-// UI helpers
-// ----------------------------------------------------------------------------
-function toast(message, type = 'info') {
-  const el = document.createElement('div');
-  el.className = `toast ${type}`;
-  el.textContent = message;
-  $('toasts').appendChild(el);
-  const life = type === 'error' ? 6500 : 3800;
-  setTimeout(() => el.classList.add('out'), life);
-  setTimeout(() => el.remove(), life + 350);
-}
-
-function loading(on, text = 'Loading…') {
-  $('loading').hidden = !on;
-  $('loading-text').textContent = text;
-}
+initTimeline(ctx);
 
 // ----------------------------------------------------------------------------
 // Simulation controls
@@ -147,14 +161,32 @@ function doReset() {
 function doStep() {
   setRunning(false);
   Physics.stepOnce();
-  refreshInspector();
+  refreshInspector(false);
+}
+
+function detonateAll() {
+  const booms = state.fields.filter((f) => f.kind === 'explosion' && f.enabled);
+  if (!booms.length) { toast('No explosion fields in the scene. Add one from Add > Force Field.', 'info'); return; }
+  booms.forEach(detonate);
+  if (!state.running) toast('Blast applied. Press Play to watch the debris fly.', 'info');
+}
+
+function clearAll() {
+  ctx.select(null);
+  clearJoints();
+  clearFields();
+  clearCloths();
+  Physics.clearEntities();
+  setRunning(false);
+  state.started = false;
+  state.frame = 0;
 }
 
 $('btn-play').addEventListener('click', () => setRunning(!state.running));
 $('btn-step').addEventListener('click', doStep);
 $('btn-reset').addEventListener('click', doReset);
 
-// Mouse clicks on toolbar buttons should not keep keyboard focus (Space would re-trigger them).
+// Mouse clicks on buttons should not keep keyboard focus (Space would re-trigger them).
 document.addEventListener('click', (ev) => {
   const b = ev.target.closest?.('button');
   if (b && ev.detail > 0) b.blur();
@@ -167,78 +199,126 @@ window.addEventListener('keydown', (ev) => {
   if (ev.key === ' ' && ev.target.tagName !== 'BUTTON') { ev.preventDefault(); setRunning(!state.running); }
   else if (key === 'n') doStep();
   else if (key === 'r') doReset();
+  else if (key === 'b') detonateAll();
+  else if (key === '.') frameSelected();
+  else if (key === 'home') resetCamera();
   else if (ev.key === '?') toggleHelp();
 });
 
 // ----------------------------------------------------------------------------
-// World controls
+// View toggles (overlays, grid, shadows, floor): menu items, overlay buttons and checkboxes stay in sync
 // ----------------------------------------------------------------------------
-function readGravityInputs() {
-  const g = ['x', 'y', 'z'].map((a) => {
-    const v = parseFloat($(`grav-${a}`).value);
-    return Number.isFinite(v) ? v : 0;
-  });
-  Physics.setGravity(g[0], g[1], g[2]);
-  markGravityPreset(g);
+const toggles = {
+  colliders: { on: false, apply: (v) => Physics.setDebug(v) },
+  velocity:  { on: false, apply: (v) => setOverlay('velocity', v) },
+  normals:   { on: false, apply: (v) => setOverlay('normals', v) },
+  grid:      { on: true,  apply: (v) => { grid.visible = v; axes.visible = v; } },
+  shadows:   { on: true,  apply: (v) => { sun.castShadow = v; } },
+  floor:     { on: true,  apply: (v) => { Physics.setFloor(v); ground.visible = v; orbit.maxPolarAngle = v ? Math.PI * 0.495 : Math.PI; } },
+};
+
+function setToggle(name, on) {
+  const t = toggles[name];
+  if (!t) return;
+  t.on = on;
+  t.apply(on);
+  document.querySelectorAll(`[data-toggle="${name}"]`).forEach((b) => b.classList.toggle('on', on));
+  const chk = $(`chk-${name}`);
+  if (chk) chk.checked = on;
 }
 
+document.querySelectorAll('[data-toggle]').forEach((b) =>
+  b.addEventListener('click', () => setToggle(b.dataset.toggle, !toggles[b.dataset.toggle].on)));
+for (const name of Object.keys(toggles)) {
+  const chk = $(`chk-${name}`);
+  if (chk) chk.addEventListener('change', () => setToggle(name, chk.checked));
+}
+for (const name of Object.keys(toggles)) setToggle(name, toggles[name].on);
+
+// ----------------------------------------------------------------------------
+// Scene tab: gravity, speed, solver, fling power
+// ----------------------------------------------------------------------------
 function markGravityPreset(g) {
   document.querySelectorAll('#gravity-presets .chip').forEach((c) => {
     const p = c.dataset.grav.split(',').map(Number);
     c.classList.toggle('active', p.every((v, i) => Math.abs(v - g[i]) < 1e-6));
   });
 }
-
-['x', 'y', 'z'].forEach((a) => $(`grav-${a}`).addEventListener('input', readGravityInputs));
+function readGravity() {
+  const g = [nf('grav-x').get(), nf('grav-y').get(), nf('grav-z').get()];
+  Physics.setGravity(g[0], g[1], g[2]);
+  markGravityPreset(g);
+}
+['x', 'y', 'z'].forEach((a) => nf(`grav-${a}`).on(readGravity));
 $('gravity-presets').addEventListener('click', (ev) => {
   const chip = ev.target.closest('[data-grav]');
   if (!chip) return;
   const [x, y, z] = chip.dataset.grav.split(',').map(Number);
-  $('grav-x').value = x; $('grav-y').value = y; $('grav-z').value = z;
-  readGravityInputs();
+  nf('grav-x').set(x, true); nf('grav-y').set(y, true); nf('grav-z').set(z, true);
+  readGravity();
 });
 markGravityPreset([0, -9.82, 0]);
 
-$('rng-speed').addEventListener('input', (ev) => {
-  state.timeScale = parseFloat(ev.target.value);
-  $('rng-speed-val').textContent = `${state.timeScale.toFixed(2)}×`;
-});
+nf('speed').on((v) => { state.timeScale = v; });
+nf('iter').on((v) => Physics.setSolverIterations(v));
+$('btn-clear').addEventListener('click', () => { clearAll(); toast('Scene cleared.', 'info'); });
 
-let flingPower = 14;
-$('rng-fling').addEventListener('input', (ev) => {
-  flingPower = parseFloat(ev.target.value);
-  $('rng-fling-val').textContent = String(flingPower);
-});
+// ----------------------------------------------------------------------------
+// Menus + workspaces
+// ----------------------------------------------------------------------------
+const ACTIONS = {
+  'new-scene': () => { clearAll(); toast('New empty scene.', 'info'); },
+  'load-demo': () => { clearAll(); buildDemoScene(); toast('Demo scene loaded.', 'info'); },
+  'add-cloth': () => addCloth(),
+  'toggle-play': () => setRunning(!state.running),
+  step: doStep,
+  reset: doReset,
+  'detonate-all': detonateAll,
+  'clear-scene': () => { clearAll(); toast('Scene cleared.', 'info'); },
+  'frame-selected': () => frameSelected(),
+  'reset-camera': () => resetCamera(),
+  'toggle-help': () => toggleHelp(),
+};
+document.querySelectorAll('[data-action]').forEach((b) =>
+  b.addEventListener('click', () => ACTIONS[b.dataset.action]?.()));
 
-$('chk-colliders').addEventListener('change', (ev) => Physics.setDebug(ev.target.checked));
-
-$('chk-floor').addEventListener('change', (ev) => {
-  const on = ev.target.checked;
-  Physics.setFloor(on);
-  ground.visible = on;
-  orbit.maxPolarAngle = on ? Math.PI * 0.495 : Math.PI;
-});
-
-$('chk-shadows').addEventListener('change', (ev) => { sun.castShadow = ev.target.checked; });
-
-$('btn-clear').addEventListener('click', () => {
-  ctx.select(null);
-  Physics.clearEntities();
-  setRunning(false);
-  state.started = false;
-});
-
-// panel + help
-const panel = $('side-panel');
-function setPanelCollapsed(c) {
-  panel.classList.toggle('collapsed', c);
-  $('panel-toggle').setAttribute('aria-expanded', String(!c));
+const WORKSPACES = {
+  layout:  { tab: 'object',  overlays: { colliders: false, velocity: false, normals: false } },
+  physics: { tab: 'physics', overlays: { colliders: true,  velocity: false, normals: false } },
+  debug:   { tab: 'scene',   overlays: { colliders: true,  velocity: true,  normals: true } },
+};
+function setWorkspace(name) {
+  const ws = WORKSPACES[name];
+  document.querySelectorAll('.ws-tab').forEach((b) => {
+    const on = b.dataset.ws === name;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-selected', String(on));
+  });
+  showPropsTab(ws.tab);
+  for (const [k, v] of Object.entries(ws.overlays)) setToggle(k, v);
 }
-$('panel-toggle').addEventListener('click', () => setPanelCollapsed(!panel.classList.contains('collapsed')));
-if (window.innerWidth <= 720) setPanelCollapsed(true);
+document.querySelectorAll('.ws-tab').forEach((b) => b.addEventListener('click', () => setWorkspace(b.dataset.ws)));
 
 function toggleHelp() { $('help').hidden = !$('help').hidden; }
-$('btn-help').addEventListener('click', toggleHelp);
+
+function frameSelected() {
+  const it = ctx.selected;
+  if (!it) { toast('Select something to frame.', 'info'); return; }
+  const p = new THREE.Vector3();
+  it.root.getWorldPosition(p);
+  if (it.category === 'cloth' && it.particles.length) {
+    const c = it.particles[Math.floor(it.particles.length / 2)].position;
+    p.set(c.x, c.y, c.z);
+  }
+  const offset = camera.position.clone().sub(orbit.target);
+  orbit.target.copy(p);
+  camera.position.copy(p).add(offset);
+}
+function resetCamera() {
+  camera.position.copy(HOME_POS);
+  orbit.target.copy(HOME_TARGET);
+  orbit.update();
+}
 
 // ----------------------------------------------------------------------------
 // Fling tool: click a dynamic body, pull back (slingshot style), release
@@ -255,7 +335,7 @@ function initFling() {
   let warnedStatic = false;
   let autoPlayHinted = false;
 
-  const arrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 1, 0x3ddc97, 0.4, 0.25);
+  const arrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 1, 0x7ac74f, 0.4, 0.25);
   arrow.visible = false;
   arrow.renderOrder = 1000;
   for (const m of [arrow.line.material, arrow.cone.material]) { m.depthTest = false; m.transparent = true; }
@@ -321,7 +401,7 @@ function initFling() {
     const entity = hits[0].object.userData.entity;
     if (!entity) return;
     if (entity.isStatic) {
-      if (!warnedStatic) { warnedStatic = true; toast('Static bodies cannot be flung. Untick “Static collider” to make it dynamic.', 'info'); }
+      if (!warnedStatic) { warnedStatic = true; toast('Static bodies cannot be flung. Set its type to Active in the Physics tab.', 'info'); }
       return;
     }
     ev.stopImmediatePropagation();                  // keep OrbitControls out of this gesture
@@ -344,7 +424,7 @@ function initFling() {
 
     // Strength = velocity change in m/s at full pull; applied slightly off-centre for a little spin.
     const mass = entity.body.mass;
-    const k = frac * flingPower * mass;
+    const k = frac * nf('fling').get() * mass;
     const at = new THREE.Vector3(entity.body.position.x, entity.body.position.y, entity.body.position.z).lerp(point, 0.5);
     Physics.applyImpulse(entity, launch.clone().multiplyScalar(k), at);
     if (!state.running) {
@@ -358,7 +438,7 @@ function initFling() {
 }
 
 // ----------------------------------------------------------------------------
-// Demo scene (a ball, a ramp and a small box pyramid)
+// Demo scene: ramp + ball, box pyramid, spring pendulum, hanging cloth with a wind field
 // ----------------------------------------------------------------------------
 function place(entity, x, y, z) {
   entity.mesh.position.set(x, y, z);
@@ -369,14 +449,32 @@ function place(entity, x, y, z) {
 function buildDemoScene() {
   place(spawnPrimitive('ramp', true), -3, 1, 0);
   const ball = spawnPrimitive('sphere', false);
-  ball.mesh.scale.setScalar(1);
   place(ball, -1.1, 2.75, 0);
+
   const rows = [
     { y: 0.5, zs: [-1.1, 0, 1.1] },
     { y: 1.5, zs: [-0.55, 0.55] },
     { y: 2.5, zs: [0] },
   ];
   for (const row of rows) for (const z of row.zs) place(spawnPrimitive('box', false), -8.5, row.y, z);
+
+  // spring pendulum hanging from a fixed point in the world
+  const bob = spawnPrimitive('sphere', false);
+  bob.mesh.scale.setScalar(0.8);
+  Physics.rebuildCollider(bob);
+  place(bob, 2.2, 3, -4);
+  bob.name = 'Pendulum bob';
+  createJoint('spring', bob, null, { pivot: new THREE.Vector3(0, 5.5, -4) });
+
+  // hanging cloth with a localised wind field
+  createCloth({ position: new THREE.Vector3(5, 3.6, 0), size: 3, res: 14, pin: 'corners' });
+  const wind = createField('wind', new THREE.Vector3(8.5, 2.6, 0));
+  wind.root.rotation.y = Math.PI;                 // blow toward -X, onto the cloth
+  wind.strength = 6;
+  wind.radius = 5;
+  wind.turbulence = 0.8;
+  wind.name = 'Wind (cloth)';
+
   ctx.select(null);
 }
 
@@ -384,26 +482,32 @@ function buildDemoScene() {
 // Resize + main loop
 // ----------------------------------------------------------------------------
 function onResize() {
-  const w = window.innerWidth;
-  const h = window.innerHeight;
-  renderer.setSize(w, h);
+  const w = Math.max(1, wrap.clientWidth);
+  const h = Math.max(1, wrap.clientHeight);
+  renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
+new ResizeObserver(onResize).observe(wrap);
 window.addEventListener('resize', onResize);
+onResize();
 
 const clock = new THREE.Clock();
-let fpsFrames = 0;
-let fpsTime = 0;
 let inspectorTimer = 0;
+let infoTimer = 0;
 
 function frame() {
   requestAnimationFrame(frame);
   const dt = Math.min(clock.getDelta(), 0.1);
 
   Physics.update(dt);
+  updateJointVisuals();
+  updateClothVisuals();
+  updateFieldVisuals(dt);
+  updateOverlays();
   orbit.update();
   updateSelectionHelper();
+  for (const fn of ctx.afterFrame) fn();
 
   inspectorTimer += dt;
   if (inspectorTimer > 0.12) {
@@ -411,14 +515,12 @@ function frame() {
     if (state.running && ctx.selected) refreshInspector(false);
   }
 
-  fpsFrames++;
-  fpsTime += dt;
-  if (fpsTime >= 0.5) {
-    $('hud-fps').textContent = `${Math.round(fpsFrames / fpsTime)} fps`;
-    const n = state.entities.length;
-    $('hud-bodies').textContent = `${n} ${n === 1 ? 'body' : 'bodies'}`;
-    fpsFrames = 0;
-    fpsTime = 0;
+  updateTimeline(dt);
+
+  infoTimer += dt;
+  if (infoTimer > 0.2) {
+    infoTimer = 0;
+    $('vp-selected').textContent = `(${state.frame}) Scene Collection${ctx.selected ? ` | ${ctx.selected.name}` : ''}`;
   }
 
   renderer.render(scene, camera);
@@ -426,8 +528,9 @@ function frame() {
 
 buildDemoScene();
 setRunning(false);
+setWorkspace('layout');
 frame();
-toast('Press Play (Space) to run the demo. Drop an STL, OBJ or GLTF/GLB file to import your own model.', 'info');
+toast('Press Play (Space) to run the demo. Drag a number field sideways to edit it, or drop an STL / OBJ / GLTF file to import a model.', 'info');
 
 // Handy for debugging in the browser console.
-window.__physicsLab = { scene, camera, Physics };
+window.__physim = { scene, camera, Physics };

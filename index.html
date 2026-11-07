@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="description" content="3D Physics Simulator: drop in STL, OBJ, GLTF or GLB models, build obstacle courses and fling objects around with real rigid-body physics." />
-  <meta name="theme-color" content="#0e1117" />
-  <title>3D Physics Simulator</title>
+  <meta name="description" content="PhySim 3D: a browser rigid-body, joint, force-field and cloth physics sandbox with a Blender-style interface." />
+  <meta name="theme-color" content="#1e1e1e" />
+  <title>PhySim 3D</title>
   <link rel="stylesheet" href="styles.css" />
 
-  <!-- Optional polyfill so import maps also work in older Safari / browsers -->
+  <!-- Polyfill so import maps also work in older browsers -->
   <script async src="https://cdn.jsdelivr.net/npm/es-module-shims@1.8.3/dist/es-module-shims.js"></script>
   <script type="importmap">
   {
@@ -21,251 +21,459 @@
   </script>
 </head>
 <body>
-  <canvas id="viewport" aria-label="3D physics viewport"></canvas>
+<div id="app">
 
-  <!-- ===================== Top bar: simulation controls ===================== -->
-  <header id="sim-bar" class="floating toolbar">
-    <span class="brand" aria-hidden="true">
+  <!-- ============================ Top bar ============================ -->
+  <header id="topbar">
+    <div class="logo" title="PhySim 3D">
       <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 2 3 7v10l9 5 9-5V7l-9-5Zm0 2.2 6.6 3.7L12 11.6 5.4 7.9 12 4.2ZM5 9.6l6 3.4v6.6l-6-3.3V9.6Zm8 10V13l6-3.4v6.7l-6 3.3Z"/></svg>
-      <span>Physics&nbsp;Lab</span>
-    </span>
-    <span class="divider"></span>
-    <button id="btn-play" class="btn primary" title="Play / Pause (Space)">
-      <svg class="icon-play" viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>
-      <svg class="icon-pause" viewBox="0 0 24 24" width="18" height="18" hidden><path fill="currentColor" d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
-      <span id="play-label">Play</span>
-    </button>
-    <button id="btn-step" class="btn" title="Advance one physics step (N)">
-      <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M6 5v14l9-7zM16 5h2v14h-2z"/></svg>
-      <span>Step</span>
-    </button>
-    <button id="btn-reset" class="btn" title="Reset all bodies to their start transforms (R)">
-      <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7Z"/></svg>
-      <span>Reset</span>
-    </button>
-    <span class="divider"></span>
-    <span id="sim-state" class="pill paused">Paused</span>
+    </div>
+
+    <nav class="menus" aria-label="Main menu">
+      <div class="menu">
+        <button class="menu-btn">File</button>
+        <div class="dropdown">
+          <button data-action="new-scene">New Scene</button>
+          <button data-action="load-demo">Load Demo Scene</button>
+          <hr />
+          <button id="btn-import">Import Model… <kbd>STL OBJ GLTF GLB</kbd></button>
+        </div>
+      </div>
+
+      <div class="menu">
+        <button class="menu-btn">Add</button>
+        <div class="dropdown">
+          <div class="sub">
+            <button class="has-sub">Rigid Body (Active)</button>
+            <div class="dropdown submenu">
+              <button data-spawn="sphere">Sphere</button>
+              <button data-spawn="box">Box</button>
+              <button data-spawn="cylinder">Cylinder</button>
+              <button data-spawn="ramp">Ramp</button>
+            </div>
+          </div>
+          <div class="sub">
+            <button class="has-sub">Static Collider (Passive)</button>
+            <div class="dropdown submenu">
+              <button data-spawn="sphere" data-static="1">Sphere</button>
+              <button data-spawn="box" data-static="1">Wall / Floor</button>
+              <button data-spawn="cylinder" data-static="1">Pillar</button>
+              <button data-spawn="ramp" data-static="1">Ramp</button>
+            </div>
+          </div>
+          <hr />
+          <div class="sub">
+            <button class="has-sub">Constraint</button>
+            <div class="dropdown submenu">
+              <button data-joint="distance">Distance Joint</button>
+              <button data-joint="spring">Spring Joint</button>
+              <button data-joint="hinge">Hinge Joint</button>
+              <button data-joint="p2p">Point-to-Point</button>
+            </div>
+          </div>
+          <div class="sub">
+            <button class="has-sub">Force Field</button>
+            <div class="dropdown submenu">
+              <button data-field="wind">Wind</button>
+              <button data-field="attractor">Point Attractor</button>
+              <button data-field="explosion">Radial Explosion</button>
+            </div>
+          </div>
+          <button data-action="add-cloth">Cloth (spring-mass grid)</button>
+        </div>
+      </div>
+
+      <div class="menu">
+        <button class="menu-btn">Scene</button>
+        <div class="dropdown">
+          <button data-action="toggle-play">Play / Pause <kbd>Space</kbd></button>
+          <button data-action="step">Step <kbd>N</kbd></button>
+          <button data-action="reset">Reset <kbd>R</kbd></button>
+          <hr />
+          <button data-action="detonate-all">Detonate All Explosions <kbd>B</kbd></button>
+          <button data-action="clear-scene">Clear Scene</button>
+        </div>
+      </div>
+
+      <div class="menu">
+        <button class="menu-btn">View</button>
+        <div class="dropdown">
+          <button data-toggle="colliders"><i class="tick"></i>Collision Wireframes</button>
+          <button data-toggle="velocity"><i class="tick"></i>Velocity Vectors</button>
+          <button data-toggle="normals"><i class="tick"></i>Collision Normals</button>
+          <hr />
+          <button data-toggle="grid"><i class="tick"></i>Grid</button>
+          <button data-toggle="shadows"><i class="tick"></i>Shadows</button>
+          <button data-toggle="floor"><i class="tick"></i>Floor Collider</button>
+          <hr />
+          <button data-action="frame-selected">Frame Selected <kbd>.</kbd></button>
+          <button data-action="reset-camera">Reset Camera <kbd>Home</kbd></button>
+          <button data-action="toggle-help">Shortcuts <kbd>?</kbd></button>
+        </div>
+      </div>
+    </nav>
+
+    <div class="workspaces" role="tablist" aria-label="Workspaces">
+      <button class="ws-tab active" data-ws="layout" role="tab">Layout</button>
+      <button class="ws-tab" data-ws="physics" role="tab">Physics</button>
+      <button class="ws-tab" data-ws="debug" role="tab">Debug</button>
+    </div>
+
+    <div class="topbar-right"><span id="scene-name">Scene</span></div>
   </header>
 
-  <!-- ===================== Left bar: spawn + import ===================== -->
-  <aside id="build-bar" class="floating toolbar vertical" aria-label="Build tools">
-    <div class="group-label">Add</div>
-    <button class="btn tool" data-spawn="sphere" title="Add sphere">
-      <svg viewBox="0 0 24 24" width="22" height="22"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><ellipse cx="12" cy="12" rx="8.5" ry="3.2" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".6"/></svg>
-      <span>Sphere</span>
-    </button>
-    <button class="btn tool" data-spawn="box" title="Add box / wall / floor">
-      <svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Zm0 9L4 7.5M12 12l8-4.5M12 12v9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
-      <span>Box</span>
-    </button>
-    <button class="btn tool" data-spawn="cylinder" title="Add cylinder">
-      <svg viewBox="0 0 24 24" width="22" height="22"><ellipse cx="12" cy="6.5" rx="7" ry="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 6.5v11c0 1.7 3.1 3 7 3s7-1.3 7-3v-11" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
-      <span>Cylinder</span>
-    </button>
-    <button class="btn tool" data-spawn="ramp" title="Add ramp">
-      <svg viewBox="0 0 24 24" width="22" height="22"><path d="M3 19h18V9L3 19Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
-      <span>Ramp</span>
-    </button>
-    <div class="group-label">Spawn as</div>
-    <div class="segmented" id="spawn-mode" role="group" aria-label="Spawn as">
-      <button class="seg active" data-spawnmode="dynamic" title="Dynamic: falls and collides">Dynamic</button>
-      <button class="seg" data-spawnmode="static" title="Static: immovable wall / floor / ramp">Static</button>
+  <!-- ============================ Workspace ============================ -->
+  <main id="workspace">
+
+    <!-- tool shelf -->
+    <aside id="toolbar" aria-label="Tools">
+      <button class="tool active" data-tool="select" title="Select (Q)">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="m5 3 14 8-6 1.7L15.5 20l-2.4 1-2.6-7.2L6 17.5 5 3Z"/></svg>
+      </button>
+      <button class="tool" data-tool="translate" title="Move (W)">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 2 8 6h3v5H6V8l-4 4 4 4v-3h5v5H8l4 4 4-4h-3v-5h5v3l4-4-4-4v3h-5V6h3l-4-4Z"/></svg>
+      </button>
+      <button class="tool" data-tool="rotate" title="Rotate (E)">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 4a8 8 0 0 0-8 8H1l4 4 4-4H6a6 6 0 1 1 1.8 4.2l-1.4 1.4A8 8 0 1 0 12 4Z"/></svg>
+      </button>
+      <button class="tool" data-tool="scale" title="Scale (T)">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M3 3h7v2H6.4l4.3 4.3-1.4 1.4L5 6.4V10H3V3Zm18 18h-7v-2h3.6l-4.3-4.3 1.4-1.4L19 17.6V14h2v7Z"/></svg>
+      </button>
+      <span class="tool-sep"></span>
+      <button class="tool" data-tool="grab" title="Drag with a spring joint (G)">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M9 3a1.5 1.5 0 0 1 3 0v6h1V4.5a1.5 1.5 0 0 1 3 0V10h1V6.5a1.5 1.5 0 0 1 3 0V15c0 3.9-2.7 7-6.5 7-2.7 0-4.4-1-5.9-3L3.6 14a1.5 1.5 0 0 1 2.4-1.7L8 14.5V3Z"/></svg>
+      </button>
+      <button class="tool" data-tool="fling" title="Fling: click an object, pull back, release (F)">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M3 12 13 4v5h8v6h-8v5L3 12Z"/></svg>
+      </button>
+    </aside>
+
+    <!-- 3D viewport -->
+    <section id="viewport-wrap">
+      <canvas id="viewport" aria-label="3D physics viewport"></canvas>
+      <div id="vp-info"><b>User Perspective</b><span id="vp-selected">(0) Scene Collection</span></div>
+      <div id="vp-overlays" aria-label="Viewport overlays">
+        <button class="vp-btn" data-toggle="colliders" title="Collision wireframes">Colliders</button>
+        <button class="vp-btn" data-toggle="velocity" title="Velocity vectors">Velocity</button>
+        <button class="vp-btn" data-toggle="normals" title="Contact normals">Normals</button>
+      </div>
+      <aside id="help" hidden>
+        <strong>Shortcuts</strong>
+        <ul>
+          <li><kbd>LMB drag</kbd> orbit · <kbd>RMB drag</kbd> pan · <kbd>Wheel</kbd> zoom</li>
+          <li><kbd>Space</kbd> play/pause · <kbd>N</kbd> step · <kbd>R</kbd> reset</li>
+          <li><kbd>Q W E T</kbd> select / move / rotate / scale</li>
+          <li><kbd>G</kbd> spring-drag · <kbd>F</kbd> fling · <kbd>B</kbd> detonate</li>
+          <li><kbd>Del</kbd> delete · <kbd>Esc</kbd> deselect · <kbd>.</kbd> frame selected</li>
+          <li>Number fields: drag sideways, <kbd>Shift</kbd> = fine, <kbd>Ctrl</kbd> = coarse, click to type.</li>
+        </ul>
+      </aside>
+    </section>
+
+    <!-- right sidebar -->
+    <aside id="sidebar">
+
+      <!-- Outliner -->
+      <div class="area" id="outliner-area">
+        <div class="area-head"><span>Outliner</span><small id="outliner-count"></small></div>
+        <div id="outliner" role="tree"></div>
+      </div>
+
+      <!-- Properties -->
+      <div class="area" id="props-area">
+        <div class="ptabs" role="tablist">
+          <button class="ptab" data-ptab="scene" role="tab" title="Scene &amp; world settings">
+            <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 2c1.3 0 2.5.4 3.5 1-.6.4-1 1-1 1.7 0 1.2 1 2 2.3 2H19a8 8 0 0 1 .2 1.6c-1 .3-1.6 1-1.6 1.8 0 1 .8 1.7 1.6 2.2A8 8 0 0 1 12 20c-.3-1-1.2-1.7-2.200-1.7C8.700 18.300 8 17.400 8 16.500 8 15.400 7 14.500 6 14.500H4.300A8 8 0 0 1 12 4Z"/></svg>
+            <span>Scene</span>
+          </button>
+          <button class="ptab" data-ptab="physics" role="tab" title="Physics properties of the selection">
+            <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M12 9.500a2.500 2.500 0 1 0 0 5 2.500 2.500 0 0 0 0-5ZM4.500 6.500c-1.700 0-2.500.9-2.500 1.800 0 1.800 2.600 4.700 7.200 6.900-.1-.7-.2-1.400-.2-2.200-3-1.400-4.300-3.100-4.300-4 .5-.2 1.200 0 2.200.4.700-.6 1.400-1.100 2.200-1.600-1.800-1-3.500-1.300-4.600-1.300Zm15 0c-1.100 0-2.800.3-4.600 1.300.8.500 1.500 1 2.200 1.600 1-.4 1.700-.6 2.200-.4 0 .9-1.300 2.600-4.300 4 0 .8-.1 1.500-.2 2.200 4.600-2.200 7.200-5.100 7.200-6.900 0-.9-.8-1.800-2.500-1.800ZM12 17c-1.100 1.800-1.800 3.600-1.800 4.500 0 .8.700 1.500 1.800 1.500s1.800-.7 1.800-1.500c0-.9-.7-2.700-1.800-4.500Z"/></svg>
+            <span>Physics</span>
+          </button>
+          <button class="ptab" data-ptab="object" role="tab" title="Object name and transform">
+            <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M12 2 3 7v10l9 5 9-5V7l-9-5Zm0 2.200L18.600 8 12 11.700 5.400 8 12 4.200ZM5 9.700l6 3.400v6.600l-6-3.400V9.700Zm8 10V13l6-3.300v6.600l-6 3.400Z"/></svg>
+            <span>Object</span>
+          </button>
+        </div>
+
+        <div class="props-scroll">
+
+          <!-- ============ SCENE TAB ============ -->
+          <div class="ptab-panel" id="ptab-scene" hidden>
+            <details class="psec" open>
+              <summary>Gravity</summary>
+              <div class="psec-body">
+                <div class="nf-row3">
+                  <div class="nf" id="nf-grav-x" data-label="X" data-step="0.1" data-prec="2" data-value="0"></div>
+                  <div class="nf" id="nf-grav-y" data-label="Y" data-step="0.1" data-prec="2" data-value="-9.82"></div>
+                  <div class="nf" id="nf-grav-z" data-label="Z" data-step="0.1" data-prec="2" data-value="0"></div>
+                </div>
+                <div class="chips" id="gravity-presets">
+                  <button class="chip" data-grav="0,-9.82,0">Earth</button>
+                  <button class="chip" data-grav="0,-1.62,0">Moon</button>
+                  <button class="chip" data-grav="0,0,0">Zero-G</button>
+                  <button class="chip" data-grav="0,9.82,0">Up</button>
+                  <button class="chip" data-grav="-9.82,0,0">Left</button>
+                  <button class="chip" data-grav="9.82,0,0">Right</button>
+                  <button class="chip" data-grav="0,0,-9.82">Away</button>
+                  <button class="chip" data-grav="0,0,9.82">Near</button>
+                </div>
+              </div>
+            </details>
+
+            <details class="psec" open>
+              <summary>Simulation</summary>
+              <div class="psec-body">
+                <div class="nf slider" id="nf-speed" data-label="Speed" data-min="0.1" data-max="2" data-step="0.05" data-prec="2" data-value="1" data-unit="×"></div>
+                <div class="nf" id="nf-iter" data-label="Solver Iterations" data-min="4" data-max="60" data-step="1" data-prec="0" data-value="14"></div>
+                <div class="nf slider" id="nf-fling" data-label="Fling Power" data-min="1" data-max="40" data-step="1" data-prec="0" data-value="14"></div>
+              </div>
+            </details>
+
+            <details class="psec" open>
+              <summary>World</summary>
+              <div class="psec-body">
+                <label class="cb"><input type="checkbox" id="chk-floor" checked /><span>Floor collider</span></label>
+                <label class="cb"><input type="checkbox" id="chk-shadows" checked /><span>Shadows</span></label>
+                <label class="cb"><input type="checkbox" id="chk-grid" checked /><span>Grid</span></label>
+              </div>
+            </details>
+
+            <details class="psec" open>
+              <summary>Viewport Overlays</summary>
+              <div class="psec-body">
+                <label class="cb"><input type="checkbox" id="chk-colliders" /><span>Collision wireframes</span></label>
+                <label class="cb"><input type="checkbox" id="chk-velocity" /><span>Velocity vectors</span></label>
+                <label class="cb"><input type="checkbox" id="chk-normals" /><span>Collision normals</span></label>
+                <button id="btn-clear" class="btn wide">Clear Scene</button>
+              </div>
+            </details>
+          </div>
+
+          <!-- ============ PHYSICS TAB ============ -->
+          <div class="ptab-panel" id="ptab-physics" hidden>
+            <p id="phys-none" class="empty">Select an object, joint, force field or cloth in the Outliner or the viewport.</p>
+
+            <!-- rigid body -->
+            <div id="phys-body" hidden>
+              <details class="psec" open>
+                <summary>Rigid Body</summary>
+                <div class="psec-body">
+                  <div class="prop"><label for="sel-type">Type</label>
+                    <select id="sel-type"><option value="active">Active (dynamic)</option><option value="passive">Passive (static collider)</option></select>
+                  </div>
+                  <div class="row-collider prop" id="row-collider" hidden><label for="sel-collider">Shape</label>
+                    <select id="sel-collider"><option value="hull">Convex hull</option><option value="bbox">Bounding box</option></select>
+                  </div>
+                  <div class="nf" id="nf-mass" data-label="Mass" data-min="0.01" data-max="10000" data-step="0.1" data-prec="2" data-value="1" data-unit=" kg"></div>
+                </div>
+              </details>
+              <details class="psec" open>
+                <summary>Surface Response</summary>
+                <div class="psec-body">
+                  <div class="nf slider" id="nf-restitution" data-label="Bounciness" data-min="0" data-max="1.2" data-step="0.01" data-prec="2" data-value="0.3"></div>
+                  <div class="nf slider" id="nf-friction" data-label="Friction" data-min="0" data-max="2" data-step="0.01" data-prec="2" data-value="0.5"></div>
+                  <p class="hint">Contact values multiply with the other body. The floor is 1.0, so it never dampens.</p>
+                </div>
+              </details>
+              <details class="psec">
+                <summary>Dynamics</summary>
+                <div class="psec-body">
+                  <div class="nf slider" id="nf-lindamp" data-label="Linear Damping" data-min="0" data-max="1" data-step="0.01" data-prec="2" data-value="0.02"></div>
+                  <div class="nf slider" id="nf-angdamp" data-label="Angular Damping" data-min="0" data-max="1" data-step="0.01" data-prec="2" data-value="0.08"></div>
+                </div>
+              </details>
+              <details class="psec">
+                <summary>Apply Impulse</summary>
+                <div class="psec-body">
+                  <div class="nf slider" id="nf-impulse" data-label="Strength" data-min="1" data-max="60" data-step="1" data-prec="0" data-value="12" data-unit=" m/s"></div>
+                  <div class="impulse-grid" id="impulse-grid">
+                    <button class="btn" data-imp="-1,0,0">−X</button>
+                    <button class="btn" data-imp="1,0,0">+X</button>
+                    <button class="btn" data-imp="0,1,0">+Y (up)</button>
+                    <button class="btn" data-imp="0,-1,0">−Y</button>
+                    <button class="btn" data-imp="0,0,-1">−Z (away)</button>
+                    <button class="btn" data-imp="0,0,1">+Z (near)</button>
+                  </div>
+                </div>
+              </details>
+            </div>
+
+            <!-- force field -->
+            <div id="phys-field" hidden>
+              <details class="psec" open>
+                <summary id="fld-title">Force Field</summary>
+                <div class="psec-body">
+                  <label class="cb"><input type="checkbox" id="fld-enabled" checked /><span>Enabled</span></label>
+                  <div class="nf" id="nf-fld-strength" data-label="Strength" data-min="-200" data-max="200" data-step="0.5" data-prec="1" data-value="8"></div>
+                  <div class="nf" id="nf-fld-radius" data-label="Radius" data-min="0" data-max="60" data-step="0.25" data-prec="2" data-value="0" data-unit=" m"></div>
+                  <div class="nf" id="nf-fld-falloff" data-label="Falloff" data-min="0" data-max="4" data-step="0.1" data-prec="1" data-value="2"></div>
+                  <div class="nf slider" id="nf-fld-turb" data-label="Turbulence" data-min="0" data-max="2" data-step="0.05" data-prec="2" data-value="0.5"></div>
+                  <div class="nf" id="nf-fld-trigger" data-label="Detonate at Frame" data-min="0" data-max="5000" data-step="1" data-prec="0" data-value="0"></div>
+                  <button id="btn-detonate" class="btn wide">Detonate Now</button>
+                  <p class="hint" id="fld-hint"></p>
+                </div>
+              </details>
+            </div>
+
+            <!-- joint -->
+            <div id="phys-joint" hidden>
+              <details class="psec" open>
+                <summary id="jnt-title">Constraint</summary>
+                <div class="psec-body">
+                  <div class="prop"><label for="jnt-a">Body A</label><select id="jnt-a"></select></div>
+                  <div class="prop"><label for="jnt-b">Body B</label><select id="jnt-b"></select></div>
+                  <div class="nf" id="nf-jnt-length" data-label="Length" data-min="0.05" data-max="60" data-step="0.05" data-prec="2" data-value="2" data-unit=" m"></div>
+                  <div class="nf" id="nf-jnt-stiff" data-label="Stiffness" data-min="0" data-max="2000" data-step="1" data-prec="0" data-value="80" data-unit=" N/m"></div>
+                  <div class="nf" id="nf-jnt-damp" data-label="Damping" data-min="0" data-max="200" data-step="0.5" data-prec="1" data-value="4"></div>
+                  <label class="cb"><input type="checkbox" id="jnt-collide" /><span>Collide connected bodies</span></label>
+                  <p class="hint warn" id="jnt-warn" hidden>Both bodies are static, so this joint is inactive. Make one of them Active.</p>
+                </div>
+              </details>
+              <details class="psec" id="jnt-axis-sec" open>
+                <summary>Hinge Axis &amp; Motor</summary>
+                <div class="psec-body">
+                  <div class="nf-row3">
+                    <div class="nf" id="nf-jnt-ax" data-label="X" data-step="0.1" data-prec="2" data-value="0"></div>
+                    <div class="nf" id="nf-jnt-ay" data-label="Y" data-step="0.1" data-prec="2" data-value="0"></div>
+                    <div class="nf" id="nf-jnt-az" data-label="Z" data-step="0.1" data-prec="2" data-value="1"></div>
+                  </div>
+                  <div class="nf" id="nf-jnt-mspeed" data-label="Motor Speed" data-min="-30" data-max="30" data-step="0.1" data-prec="1" data-value="0" data-unit=" rad/s"></div>
+                  <div class="nf" id="nf-jnt-mforce" data-label="Motor Force" data-min="0" data-max="1000" data-step="1" data-prec="0" data-value="30"></div>
+                </div>
+              </details>
+              <details class="psec" id="jnt-pivot-sec" open>
+                <summary>Pivot (world)</summary>
+                <div class="psec-body">
+                  <div class="nf-row3">
+                    <div class="nf" id="nf-jnt-px" data-label="X" data-step="0.1" data-prec="2" data-value="0"></div>
+                    <div class="nf" id="nf-jnt-py" data-label="Y" data-step="0.1" data-prec="2" data-value="0"></div>
+                    <div class="nf" id="nf-jnt-pz" data-label="Z" data-step="0.1" data-prec="2" data-value="0"></div>
+                  </div>
+                </div>
+              </details>
+            </div>
+
+            <!-- cloth -->
+            <div id="phys-cloth" hidden>
+              <details class="psec" open>
+                <summary>Cloth</summary>
+                <div class="psec-body">
+                  <div class="nf" id="nf-cl-res" data-label="Resolution" data-min="4" data-max="30" data-step="1" data-prec="0" data-value="14"></div>
+                  <div class="nf" id="nf-cl-size" data-label="Size" data-min="0.5" data-max="12" data-step="0.1" data-prec="2" data-value="3" data-unit=" m"></div>
+                  <div class="prop"><label for="cl-pin">Pinning</label>
+                    <select id="cl-pin"><option value="corners">Top corners</option><option value="edge">Top edge</option><option value="none">None (free fall)</option></select>
+                  </div>
+                </div>
+              </details>
+              <details class="psec" open>
+                <summary>Springs</summary>
+                <div class="psec-body">
+                  <div class="nf" id="nf-cl-mass" data-label="Particle Mass" data-min="0.005" data-max="1" data-step="0.005" data-prec="3" data-value="0.05" data-unit=" kg"></div>
+                  <div class="nf slider" id="nf-cl-stiff" data-label="Stiffness" data-min="20" data-max="500" data-step="5" data-prec="0" data-value="200"></div>
+                  <div class="nf slider" id="nf-cl-damp" data-label="Damping" data-min="0" data-max="20" data-step="0.1" data-prec="1" data-value="3"></div>
+                  <p class="hint">Moving or rotating the cloth origin rebuilds the sheet. Rotate it flat (X = 0°) to drop it onto objects.</p>
+                </div>
+              </details>
+            </div>
+          </div>
+
+          <!-- ============ OBJECT TAB ============ -->
+          <div class="ptab-panel" id="ptab-object" hidden>
+            <p id="obj-empty" class="empty">Nothing selected.</p>
+            <div id="obj-body" hidden>
+              <details class="psec" open>
+                <summary>Object</summary>
+                <div class="psec-body">
+                  <div class="prop"><input id="obj-name" class="text" type="text" maxlength="40" aria-label="Object name" /><span id="obj-kind" class="pill">box</span></div>
+                  <label class="cb"><input type="checkbox" id="obj-visible" checked /><span>Visible in viewport</span></label>
+                </div>
+              </details>
+              <details class="psec" open>
+                <summary>Transform</summary>
+                <div class="psec-body">
+                  <div class="grp-label">Location</div>
+                  <div class="nf-row3">
+                    <div class="nf" id="nf-loc-x" data-label="X" data-step="0.1" data-prec="3" data-value="0"></div>
+                    <div class="nf" id="nf-loc-y" data-label="Y" data-step="0.1" data-prec="3" data-value="0"></div>
+                    <div class="nf" id="nf-loc-z" data-label="Z" data-step="0.1" data-prec="3" data-value="0"></div>
+                  </div>
+                  <div class="grp-label">Rotation</div>
+                  <div class="nf-row3">
+                    <div class="nf" id="nf-rot-x" data-label="X" data-step="1" data-prec="1" data-value="0" data-unit="°"></div>
+                    <div class="nf" id="nf-rot-y" data-label="Y" data-step="1" data-prec="1" data-value="0" data-unit="°"></div>
+                    <div class="nf" id="nf-rot-z" data-label="Z" data-step="1" data-prec="1" data-value="0" data-unit="°"></div>
+                  </div>
+                  <div id="row-scale">
+                    <div class="grp-label">Scale</div>
+                    <div class="nf-row3">
+                      <div class="nf" id="nf-scl-x" data-label="X" data-min="0.02" data-step="0.05" data-prec="3" data-value="1"></div>
+                      <div class="nf" id="nf-scl-y" data-label="Y" data-min="0.02" data-step="0.05" data-prec="3" data-value="1"></div>
+                      <div class="nf" id="nf-scl-z" data-label="Z" data-min="0.02" data-step="0.05" data-prec="3" data-value="1"></div>
+                    </div>
+                    <label class="cb"><input type="checkbox" id="obj-uniform" checked /><span>Uniform scale</span></label>
+                  </div>
+                  <button id="btn-obj-delete" class="btn wide danger">Delete</button>
+                </div>
+              </details>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- ============================ Timeline ============================ -->
+  <footer id="timeline">
+    <div class="tl-transport">
+      <button id="btn-reset" class="tbtn" title="Reset to start frame (R)">
+        <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M6 5h2v14H6zM9 12l10-7v14z"/></svg>
+      </button>
+      <button id="btn-play" class="tbtn primary" title="Play / Pause (Space)">
+        <svg class="icon-play" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>
+        <svg class="icon-pause" viewBox="0 0 24 24" width="16" height="16" hidden><path fill="currentColor" d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+        <span id="play-label">Play</span>
+      </button>
+      <button id="btn-step" class="tbtn" title="Advance one physics step (N)">
+        <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M6 5v14l9-7zM16 5h2v14h-2z"/></svg>
+      </button>
+      <span id="sim-state" class="pill paused">Paused</span>
     </div>
-    <div class="group-label">Import</div>
-    <button id="btn-import" class="btn tool accent" title="Import STL / OBJ / GLTF / GLB (or drag &amp; drop)">
-      <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M5 20h14v-2H5v2Zm7-16-5.5 5.5 1.4 1.4L11 7.8V16h2V7.8l3.1 3.1 1.4-1.4L12 4Z"/></svg>
-      <span>Model</span>
-    </button>
-    <input id="file-input" type="file" multiple hidden accept=".stl,.obj,.mtl,.gltf,.glb,.bin,.png,.jpg,.jpeg,.webp" />
-  </aside>
 
-  <!-- ===================== Bottom bar: tool modes ===================== -->
-  <nav id="tool-bar" class="floating toolbar" aria-label="Interaction tools">
-    <button class="btn tool active" data-tool="select" title="Select (Q)">
-      <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="m5 3 14 8-6 1.7L15.5 20l-2.4 1-2.6-7.2L6 17.5 5 3Z"/></svg>
-      <span>Select</span>
-    </button>
-    <button class="btn tool" data-tool="translate" title="Move (W)">
-      <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 2 8 6h3v5H6V8l-4 4 4 4v-3h5v5H8l4 4 4-4h-3v-5h5v3l4-4-4-4v3h-5V6h3l-4-4Z"/></svg>
-      <span>Move</span>
-    </button>
-    <button class="btn tool" data-tool="rotate" title="Rotate (E)">
-      <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 4a8 8 0 0 0-8 8H1l4 4 4-4H6a6 6 0 1 1 1.8 4.2l-1.4 1.4A8 8 0 1 0 12 4Z"/></svg>
-      <span>Rotate</span>
-    </button>
-    <button class="btn tool" data-tool="scale" title="Scale (T)">
-      <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M3 3h7v2H6.4l4.3 4.3-1.4 1.4L5 6.4V10H3V3Zm18 18h-7v-2h3.6l-4.3-4.3 1.4-1.4L19 17.6V14h2v7Z"/></svg>
-      <span>Scale</span>
-    </button>
-    <span class="divider"></span>
-    <button class="btn tool" data-tool="fling" title="Fling: click a dynamic body, pull back and release (F)">
-      <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M3 12 13 4v5h8v6h-8v5L3 12Z"/></svg>
-      <span>Fling</span>
-    </button>
-    <span class="divider"></span>
-    <button id="btn-delete" class="btn danger" title="Delete selected (Del)" disabled>
-      <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12ZM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4Z"/></svg>
-      <span>Delete</span>
-    </button>
-  </nav>
-
-  <!-- ===================== Right panel: properties + world ===================== -->
-  <aside id="side-panel" class="floating panel" aria-label="Inspector">
-    <button id="panel-toggle" class="panel-handle" aria-expanded="true" title="Show / hide panel">
-      <span>Inspector</span>
-      <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="m7 10 5 5 5-5z"/></svg>
-    </button>
-
-    <div class="panel-body">
-      <section>
-        <h2>Selected object</h2>
-        <p id="sel-empty" class="muted">Nothing selected. Click an object in the scene, or add one from the left toolbar.</p>
-
-        <div id="sel-body" hidden>
-          <div class="row">
-            <input id="sel-name" class="text" type="text" maxlength="40" aria-label="Object name" />
-            <span id="sel-kind" class="pill">box</span>
-          </div>
-
-          <label class="row switch-row" for="sel-static">
-            <span>Static collider <small>(immovable)</small></span>
-            <input id="sel-static" type="checkbox" class="switch" />
-          </label>
-
-          <div class="field">
-            <label for="sel-mass">Mass (kg)</label>
-            <input id="sel-mass" type="number" min="0.01" step="0.1" value="1" />
-          </div>
-          <div class="field">
-            <label for="sel-restitution">Bounciness</label>
-            <input id="sel-restitution" type="range" min="0" max="1.2" step="0.01" value="0.3" />
-            <output id="sel-restitution-val">0.30</output>
-          </div>
-          <div class="field">
-            <label for="sel-friction">Friction</label>
-            <input id="sel-friction" type="range" min="0" max="2" step="0.01" value="0.5" />
-            <output id="sel-friction-val">0.50</output>
-          </div>
-          <p class="hint">Contact values combine by multiplication with the other body. The floor is 1.0, so it never dampens.</p>
-
-          <div id="row-collider" class="field" hidden>
-            <label for="sel-collider">Collider</label>
-            <select id="sel-collider">
-              <option value="hull">Convex hull</option>
-              <option value="bbox">Bounding box</option>
-            </select>
-          </div>
-
-          <h3>Transform</h3>
-          <div class="xyz"><span>Pos</span>
-            <input id="sel-pos-x" type="number" step="0.1" aria-label="Position X" />
-            <input id="sel-pos-y" type="number" step="0.1" aria-label="Position Y" />
-            <input id="sel-pos-z" type="number" step="0.1" aria-label="Position Z" />
-          </div>
-          <div class="xyz"><span>Rot&deg;</span>
-            <input id="sel-rot-x" type="number" step="5" aria-label="Rotation X degrees" />
-            <input id="sel-rot-y" type="number" step="5" aria-label="Rotation Y degrees" />
-            <input id="sel-rot-z" type="number" step="5" aria-label="Rotation Z degrees" />
-          </div>
-          <div class="xyz"><span>Scale</span>
-            <input id="sel-scale-x" type="number" step="0.1" min="0.05" aria-label="Scale X" />
-            <input id="sel-scale-y" type="number" step="0.1" min="0.05" aria-label="Scale Y" />
-            <input id="sel-scale-z" type="number" step="0.1" min="0.05" aria-label="Scale Z" />
-          </div>
-          <label class="row switch-row" for="sel-uniform">
-            <span>Uniform scale</span>
-            <input id="sel-uniform" type="checkbox" class="switch" checked />
-          </label>
-
-          <h3>Apply impulse</h3>
-          <div class="field">
-            <label for="imp-strength">Strength</label>
-            <input id="imp-strength" type="range" min="1" max="60" step="1" value="12" />
-            <output id="imp-strength-val">12</output>
-          </div>
-          <div class="impulse-grid" id="impulse-grid">
-            <button class="btn small" data-imp="-1,0,0">&larr; &minus;X</button>
-            <button class="btn small" data-imp="1,0,0">+X &rarr;</button>
-            <button class="btn small" data-imp="0,1,0">&uarr; +Y</button>
-            <button class="btn small" data-imp="0,-1,0">&darr; &minus;Y</button>
-            <button class="btn small" data-imp="0,0,-1">&minus;Z (away)</button>
-            <button class="btn small" data-imp="0,0,1">+Z (near)</button>
-          </div>
-        </div>
-      </section>
-
-      <section>
-        <h2>World</h2>
-        <div class="xyz"><span>Gravity</span>
-          <input id="grav-x" type="number" step="0.5" value="0" aria-label="Gravity X" />
-          <input id="grav-y" type="number" step="0.5" value="-9.82" aria-label="Gravity Y" />
-          <input id="grav-z" type="number" step="0.5" value="0" aria-label="Gravity Z" />
-        </div>
-        <div class="chips" id="gravity-presets">
-          <button class="chip" data-grav="0,-9.82,0">Down</button>
-          <button class="chip" data-grav="0,9.82,0">Up</button>
-          <button class="chip" data-grav="-9.82,0,0">Left</button>
-          <button class="chip" data-grav="9.82,0,0">Right</button>
-          <button class="chip" data-grav="0,0,-9.82">Away</button>
-          <button class="chip" data-grav="0,0,9.82">Near</button>
-          <button class="chip" data-grav="0,-1.62,0">Moon</button>
-          <button class="chip" data-grav="0,0,0">Zero-G</button>
-        </div>
-        <div class="field">
-          <label for="rng-speed">Sim speed</label>
-          <input id="rng-speed" type="range" min="0.1" max="2" step="0.05" value="1" />
-          <output id="rng-speed-val">1.00&times;</output>
-        </div>
-        <div class="field">
-          <label for="rng-fling">Fling power</label>
-          <input id="rng-fling" type="range" min="1" max="40" step="1" value="14" />
-          <output id="rng-fling-val">14</output>
-        </div>
-        <label class="row switch-row" for="chk-colliders">
-          <span>Show collision wireframes</span>
-          <input id="chk-colliders" type="checkbox" class="switch" />
-        </label>
-        <label class="row switch-row" for="chk-floor">
-          <span>Floor collider</span>
-          <input id="chk-floor" type="checkbox" class="switch" checked />
-        </label>
-        <label class="row switch-row" for="chk-shadows">
-          <span>Shadows</span>
-          <input id="chk-shadows" type="checkbox" class="switch" checked />
-        </label>
-        <button id="btn-clear" class="btn small wide">Clear scene</button>
-      </section>
+    <div class="tl-frames">
+      <div class="readout"><small>Frame</small><b id="tl-frame">0</b></div>
+      <div class="nf compact" id="nf-end" data-label="End" data-min="10" data-max="100000" data-step="10" data-prec="0" data-value="250"></div>
+      <div class="prop compact"><select id="tl-endmode" aria-label="At end frame">
+        <option value="continue">Continue</option><option value="loop">Loop</option><option value="pause">Pause</option>
+      </select></div>
     </div>
-  </aside>
 
-  <!-- ===================== Overlays ===================== -->
-  <div id="hud" class="hud" aria-live="off"><span id="hud-fps">-- fps</span><span id="hud-bodies">0 bodies</span></div>
+    <div class="tl-ruler-wrap"><div id="ruler"><div id="playhead"></div></div></div>
 
-  <aside id="help" class="floating help" hidden>
-    <strong>Controls</strong>
-    <ul>
-      <li><kbd>Left drag</kbd> orbit &middot; <kbd>Right drag</kbd> pan &middot; <kbd>Wheel</kbd> zoom</li>
-      <li><kbd>Space</kbd> play / pause &middot; <kbd>N</kbd> step &middot; <kbd>R</kbd> reset</li>
-      <li><kbd>Q W E T</kbd> select / move / rotate / scale &middot; <kbd>F</kbd> fling</li>
-      <li><kbd>Del</kbd> delete selected &middot; <kbd>Esc</kbd> deselect</li>
-      <li>Fling: pick a dynamic body, pull back, release.</li>
-    </ul>
-  </aside>
-  <button id="btn-help" class="fab" title="Help (?)" aria-label="Toggle help">?</button>
-
-  <div id="dropzone" class="dropzone" hidden>
-    <div>
-      <svg viewBox="0 0 24 24" width="56" height="56"><path fill="currentColor" d="M5 20h14v-2H5v2Zm7-16-5.5 5.5 1.4 1.4L11 7.8V16h2V7.8l3.1 3.1 1.4-1.4L12 4Z"/></svg>
-      <h2>Drop your model</h2>
-      <p>STL &middot; OBJ (+MTL) &middot; GLTF &middot; GLB</p>
+    <div class="tl-stats" aria-live="off">
+      <span><small>FPS</small> <b id="tl-fps">--</b></span>
+      <span><small>Step</small> <b id="tl-step">0.00 ms</b></span>
+      <span><small>Time</small> <b id="tl-time">0.00 s</b></span>
+      <span><small>Bodies</small> <b id="tl-bodies">0</b></span>
+      <span><small>Contacts</small> <b id="tl-contacts">0</b></span>
     </div>
+  </footer>
+</div>
+
+<input id="file-input" type="file" multiple hidden accept=".stl,.obj,.mtl,.gltf,.glb,.bin,.png,.jpg,.jpeg,.webp" />
+
+<div id="dropzone" class="dropzone" hidden>
+  <div>
+    <svg viewBox="0 0 24 24" width="56" height="56"><path fill="currentColor" d="M5 20h14v-2H5v2Zm7-16-5.5 5.5 1.4 1.4L11 7.8V16h2V7.8l3.1 3.1 1.4-1.4L12 4Z"/></svg>
+    <h2>Drop your model</h2>
+    <p>STL · OBJ (+MTL) · GLTF · GLB</p>
   </div>
+</div>
+<div id="loading" class="loading" hidden><div class="spinner"></div><span id="loading-text">Loading…</span></div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<noscript><div class="fatal">PhySim 3D needs JavaScript and WebGL.</div></noscript>
 
-  <div id="loading" class="loading" hidden><div class="spinner"></div><span id="loading-text">Loading&hellip;</span></div>
-  <div id="toasts" class="toasts" aria-live="polite"></div>
-
-  <noscript><div class="fatal">This app needs JavaScript and WebGL.</div></noscript>
-
-  <script type="module" src="js/app.js"></script>
+<script type="module" src="js/app.js"></script>
 </body>
 </html>
